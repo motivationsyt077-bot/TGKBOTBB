@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HENSON SHOP — премиум-бот для продажи аккаунтов
-Версия 2.0 — полная автоматизация, админка, рефералы, отзывы
+HENSON SHOP — полностью автоматизированный бот-магазин
 """
 
 import asyncio
@@ -14,20 +13,18 @@ import threading
 import requests
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, StateFilter
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ============================================================
-# НАСТРОЙКИ (меняй здесь)
+# НАСТРОЙКИ
 # ============================================================
 BOT_TOKEN = "8384471317:AAHXF6XqzJ2sErOKZskD1j2WONSnmmeEoOc"
 ADMIN_ID = 8826333024
-# Если используешь WebApp, раскомментируй строку ниже и укажи свой URL
-# WEBAPP_URL = "https://motivationsyt077-bot.github.io/TGBOTBB/"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -81,7 +78,6 @@ def init_db():
         action TEXT,
         timestamp TEXT
     )''')
-    # Добавляем страны, если их нет
     c.execute("SELECT COUNT(*) FROM countries")
     if c.fetchone()[0] == 0:
         countries = [
@@ -95,7 +91,7 @@ def init_db():
     conn.close()
 
 # ============================================================
-# ФУНКЦИИ РАБОТЫ С БД
+# ФУНКЦИИ БД
 # ============================================================
 def get_user(user_id, username=None):
     conn = sqlite3.connect('henson.db')
@@ -258,7 +254,7 @@ def log_admin_action(admin_id, action):
     conn.close()
 
 # ============================================================
-# КЛАВИАТУРЫ (С ЭМОДЗИ И ЖИРНЫМ ТЕКСТОМ)
+# КЛАВИАТУРЫ
 # ============================================================
 def main_menu_keyboard():
     counts = get_category_counts()
@@ -315,10 +311,19 @@ def admin_keyboard():
     return builder.as_markup()
 
 # ============================================================
+# FSM ДЛЯ ДОБАВЛЕНИЯ АККАУНТА
+# ============================================================
+class AddAccountStates(StatesGroup):
+    category = State()
+    country = State()
+    phone = State()
+    price = State()
+
+# ============================================================
 # ОБРАБОТЧИКИ
 # ============================================================
 @dp.message(Command("start"))
-async def start(message: types.Message):
+async def start(message: Message):
     user = get_user(message.from_user.id, message.from_user.username)
     me = await bot.get_me()
     counts = get_category_counts()
@@ -339,19 +344,18 @@ async def start(message: types.Message):
     )
     await message.answer(text, parse_mode="HTML", reply_markup=main_menu_keyboard())
     
-    # Если есть реферальная ссылка (start параметр)
+    # Реферальная ссылка
     if message.text and len(message.text.split()) > 1:
         try:
             ref_id = int(message.text.split()[1])
             if ref_id != message.from_user.id:
-                # Начисляем бонус рефереру
                 update_balance(ref_id, 10)
                 await bot.send_message(ref_id, f"👥 Реферальный бонус! +10₽ за приглашённого @{message.from_user.username or message.from_user.id}")
         except:
             pass
 
 @dp.callback_query(lambda c: c.data.startswith("category_"))
-async def show_category(callback: types.CallbackQuery):
+async def show_category(callback: CallbackQuery):
     category = callback.data.split("_")[1]
     names = {'new': '🆕 Новые аккаунты', 'old': '⏳ Аккаунты с отлетой', 'unique': '⭐ Уникальные аккаунты'}
     await callback.message.edit_text(
@@ -363,7 +367,7 @@ async def show_category(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("buy_"))
-async def buy_account_handler(callback: types.CallbackQuery):
+async def buy_account_handler(callback: CallbackQuery):
     _, category, country = callback.data.split("_", 2)
     result = buy_account(callback.from_user.id, category, country)
     if not result:
@@ -382,7 +386,7 @@ async def buy_account_handler(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "profile")
-async def show_profile(callback: types.CallbackQuery):
+async def show_profile(callback: CallbackQuery):
     user = get_user(callback.from_user.id)
     balance = get_balance(callback.from_user.id)
     purchases = get_purchases_count(callback.from_user.id)
@@ -398,12 +402,12 @@ async def show_profile(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "back")
-async def back_to_menu(callback: types.CallbackQuery):
+async def back_to_menu(callback: CallbackQuery):
     await start(callback.message)
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "deposit")
-async def deposit(callback: types.CallbackQuery):
+async def deposit(callback: CallbackQuery):
     await callback.message.edit_text(
         "<b>💰 ПОПОЛНЕНИЕ БАЛАНСА</b>\n\n"
         "🔹 <b>Способ 1: Crypto Bot</b>\n"
@@ -419,7 +423,7 @@ async def deposit(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "my_orders")
-async def my_orders(callback: types.CallbackQuery):
+async def my_orders(callback: CallbackQuery):
     orders = get_purchases(callback.from_user.id)
     if not orders:
         await callback.message.edit_text("📦 <b>Заказов нет</b>", parse_mode="HTML", reply_markup=back_keyboard())
@@ -432,7 +436,7 @@ async def my_orders(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "referral")
-async def referral(callback: types.CallbackQuery):
+async def referral(callback: CallbackQuery):
     me = await bot.get_me()
     link = f"https://t.me/{me.username}?start={callback.from_user.id}"
     await callback.message.edit_text(
@@ -446,7 +450,7 @@ async def referral(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "rules")
-async def rules(callback: types.CallbackQuery):
+async def rules(callback: CallbackQuery):
     await callback.message.edit_text(
         "<b>📜 ПРАВИЛА И УСЛОВИЯ</b>\n\n"
         "1. Аккаунты выдаются автоматически после оплаты.\n"
@@ -460,7 +464,7 @@ async def rules(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "reviews")
-async def show_reviews(callback: types.CallbackQuery):
+async def show_reviews(callback: CallbackQuery):
     reviews = get_approved_reviews()
     if not reviews:
         await callback.message.edit_text(
@@ -489,20 +493,19 @@ async def show_reviews(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "write_review")
-async def write_review(callback: types.CallbackQuery, state: FSMContext):
+async def write_review(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✍️ Напишите ваш отзыв (не более 500 символов):")
     await state.set_state("waiting_review")
     await callback.answer()
 
-@dp.message(F.text & F.text.len() > 5)
-async def save_review(message: types.Message, state: FSMContext):
-    if await state.get_state() == "waiting_review":
-        add_review(message.from_user.id, message.text[:500])
-        await message.answer("✅ Отзыв отправлен на модерацию. После проверки он будет опубликован.")
-        await state.clear()
+@dp.message(StateFilter("waiting_review"), F.text)
+async def save_review(message: Message, state: FSMContext):
+    add_review(message.from_user.id, message.text[:500])
+    await message.answer("✅ Отзыв отправлен на модерацию. После проверки он будет опубликован.")
+    await state.clear()
 
 @dp.callback_query(lambda c: c.data == "support")
-async def support(callback: types.CallbackQuery):
+async def support(callback: CallbackQuery):
     await callback.message.edit_text(
         "<b>🛠 ТЕХНИЧЕСКАЯ ПОДДЕРЖКА</b>\n\n"
         "По всем вопросам пишите:\n"
@@ -515,10 +518,10 @@ async def support(callback: types.CallbackQuery):
     await callback.answer()
 
 # ============================================================
-# АДМИНКА (FULL)
+# АДМИН-КОМАНДЫ
 # ============================================================
 @dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
+async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Доступ запрещён")
         return
@@ -530,47 +533,54 @@ async def admin_panel(message: types.Message):
     )
 
 @dp.callback_query(lambda c: c.data == "admin_add_account")
-async def admin_add_account_prompt(callback: types.CallbackQuery):
+async def admin_add_account_prompt(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
-    await callback.message.answer(
-        "➕ <b>Добавление аккаунта</b>\n\n"
-        "Введите данные в формате:\n"
-        "<code>категория, страна, номер, цена</code>\n\n"
-        "Пример:\n"
-        "<code>new, Россия, +79001234567, 90</code>\n\n"
-        "Категории: new, old, unique"
-    )
+    await callback.message.answer("➕ <b>Добавление аккаунта</b>\n\nВведите категорию (new/old/unique):")
+    await state.set_state(AddAccountStates.category)
     await callback.answer()
 
-@dp.message(F.text.contains(","))
-async def add_account_manual(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+@dp.message(AddAccountStates.category, F.text)
+async def add_account_category(message: Message, state: FSMContext):
+    if message.text not in ('new', 'old', 'unique'):
+        await message.answer("❌ Категория должна быть new, old или unique")
         return
+    await state.update_data(category=message.text)
+    await message.answer("Введите страну (например: Россия):")
+    await state.set_state(AddAccountStates.country)
+
+@dp.message(AddAccountStates.country, F.text)
+async def add_account_country(message: Message, state: FSMContext):
+    await state.update_data(country=message.text)
+    await message.answer("Введите номер телефона (в формате +79001234567):")
+    await state.set_state(AddAccountStates.phone)
+
+@dp.message(AddAccountStates.phone, F.text)
+async def add_account_phone(message: Message, state: FSMContext):
+    await state.update_data(phone=message.text)
+    await message.answer("Введите цену в рублях (только число):")
+    await state.set_state(AddAccountStates.price)
+
+@dp.message(AddAccountStates.price, F.text)
+async def add_account_price(message: Message, state: FSMContext):
     try:
-        parts = [x.strip() for x in message.text.split(",")]
-        if len(parts) != 4:
-            await message.answer("❌ Нужно 4 значения через запятую")
-            return
-        category, country, phone, price_str = parts
-        price = int(price_str)
-        if category not in ('new', 'old', 'unique'):
-            await message.answer("❌ Категория должна быть new, old или unique")
-            return
+        price = int(message.text)
+        data = await state.get_data()
         conn = sqlite3.connect('henson.db')
         c = conn.cursor()
         c.execute("INSERT INTO accounts (category, country, phone, price, created_at) VALUES (?, ?, ?, ?, ?)",
-                  (category, country, phone, price, datetime.now().isoformat()))
+                  (data['category'], data['country'], data['phone'], price, datetime.now().isoformat()))
         conn.commit()
         conn.close()
-        log_admin_action(ADMIN_ID, f"Добавлен аккаунт: {category}, {country}, {phone}, {price}₽")
+        log_admin_action(ADMIN_ID, f"Добавлен аккаунт: {data['category']}, {data['country']}, {data['phone']}, {price}₽")
         await message.answer("✅ Аккаунт добавлен!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await state.clear()
+    except:
+        await message.answer("❌ Ошибка. Введите число.")
 
 @dp.callback_query(lambda c: c.data == "admin_stats")
-async def admin_stats(callback: types.CallbackQuery):
+async def admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -590,7 +600,7 @@ async def admin_stats(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "admin_top")
-async def admin_top(callback: types.CallbackQuery):
+async def admin_top(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -606,18 +616,17 @@ async def admin_top(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "admin_broadcast")
-async def admin_broadcast_prompt(callback: types.CallbackQuery):
+async def admin_broadcast_prompt(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
-    await callback.message.answer("📢 <b>Рассылка</b>\n\nВведите текст сообщения для всех пользователей:")
+    await callback.message.answer("📢 Введите текст сообщения для рассылки:")
+    await state.set_state("broadcast_text")
     await callback.answer()
 
-@dp.message(F.text & ~F.command)
-async def broadcast_send(message: types.Message):
+@dp.message(StateFilter("broadcast_text"), F.text)
+async def broadcast_send(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
-        return
-    if message.text.startswith("/"):
         return
     conn = sqlite3.connect('henson.db')
     c = conn.cursor()
@@ -634,9 +643,10 @@ async def broadcast_send(message: types.Message):
             pass
     await message.answer(f"✅ Рассылка отправлена {sent} пользователям.")
     log_admin_action(ADMIN_ID, f"Рассылка: {message.text[:50]}...")
+    await state.clear()
 
 @dp.callback_query(lambda c: c.data == "admin_reviews")
-async def admin_reviews(callback: types.CallbackQuery):
+async def admin_reviews(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -654,15 +664,15 @@ async def admin_reviews(callback: types.CallbackQuery):
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Одобрить", callback_data="approve_review_"),
-             InlineKeyboardButton(text="❌ Удалить", callback_data="delete_review_")],
+            [InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_review_{review_id}"),
+             InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_review_{review_id}")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back")]
         ])
     )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("approve_review_"))
-async def approve_review_callback(callback: types.CallbackQuery):
+async def approve_review_callback(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -673,7 +683,7 @@ async def approve_review_callback(callback: types.CallbackQuery):
     await admin_reviews(callback)
 
 @dp.callback_query(lambda c: c.data.startswith("delete_review_"))
-async def delete_review_callback(callback: types.CallbackQuery):
+async def delete_review_callback(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -684,7 +694,7 @@ async def delete_review_callback(callback: types.CallbackQuery):
     await admin_reviews(callback)
 
 @dp.callback_query(lambda c: c.data == "admin_manage")
-async def admin_manage_accounts(callback: types.CallbackQuery):
+async def admin_manage_accounts(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Нет прав")
         return
@@ -700,7 +710,7 @@ async def admin_manage_accounts(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.message(Command("list_accounts"))
-async def list_accounts(message: types.Message):
+async def list_accounts(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     conn = sqlite3.connect('henson.db')
@@ -717,7 +727,7 @@ async def list_accounts(message: types.Message):
     await message.answer(text, parse_mode="HTML")
 
 @dp.message(Command("delete_account"))
-async def delete_account(message: types.Message):
+async def delete_account(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = message.text.split()
@@ -737,7 +747,7 @@ async def delete_account(message: types.Message):
         await message.answer("❌ Ошибка")
 
 @dp.message(Command("edit_price"))
-async def edit_price(message: types.Message):
+async def edit_price(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = message.text.split()
@@ -758,7 +768,7 @@ async def edit_price(message: types.Message):
         await message.answer("❌ Ошибка")
 
 @dp.message(Command("add_balance"))
-async def add_balance(message: types.Message):
+async def add_balance(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = message.text.split()
@@ -776,10 +786,10 @@ async def add_balance(message: types.Message):
         await message.answer("❌ Ошибка. Проверь формат.")
 
 # ============================================================
-# ПИНГ ДЛЯ RENDER (чтобы не засыпал)
+# ПИНГ ДЛЯ RENDER
 # ============================================================
 def keep_alive():
-    url = "https://tgkbot.onrender.com"  # заменить на свой URL после деплоя
+    url = "https://tgkbot.onrender.com"  # замени на свой URL
     while True:
         try:
             requests.get(url, timeout=5)
@@ -792,7 +802,7 @@ def keep_alive():
 # ============================================================
 async def main():
     init_db()
-    print("✅ HENSON SHOP v2.0 запущен")
+    print("✅ HENSON SHOP запущен")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
